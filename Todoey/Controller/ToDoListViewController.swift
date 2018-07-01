@@ -7,43 +7,58 @@
 //
 
 import UIKit
+import RealmSwift
 
 class ToDoListViewController: UITableViewController {
 
-    var itemArray = [Item]()
-    let dataFilePath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("Items.plist")
-
+    var toDoItems: Results<Item>?
+    let realm = try! Realm()
+    
+    var selectedCategory : Category?{
+        didSet{
+            loadItems()
+        } 
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
-                        
-        loadItems()
-
+        
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return itemArray.count
+        return toDoItems?.count ?? 1
     }
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "ToDoItemCell", for: indexPath)
         
-        let item = itemArray[indexPath.row]
+        if let item = toDoItems?[indexPath.row]{
+            cell.textLabel?.text = item.title
+            
+            cell.accessoryType = item.done ? .checkmark : .none
+
+        }
+        else{
+            cell.textLabel?.text = "No items added"
+        }
         
-        cell.textLabel?.text = item.title
-        
-        cell.accessoryType = item.done ? .checkmark : .none
 
         return cell
     }
     
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        //print(itemArray[indexPath.row])                
         
-        itemArray[indexPath.row].done = !itemArray[indexPath.row].done
+        if let item = toDoItems?[indexPath.row]{
+            do{
+                try realm.write {
+                    item.done = !item.done
+                }
+            } catch{
+                print("Error saving done status: \(error)")
+            }
+        }
         
-        saveItems()
-        
+        tableView.reloadData()
         tableView.deselectRow(at: indexPath, animated: true)
     }
 
@@ -54,12 +69,24 @@ class ToDoListViewController: UITableViewController {
         var textField = UITextField()
         let alert = UIAlertController(title: "Add new todoey item", message: "", preferredStyle: .alert)
         let action = UIAlertAction(title: "Add item", style: .default) { (action) in
+
+            if let currentCategory = self.selectedCategory{
+                do{
+                    try self.realm.write {
+                        let newItem = Item()
+                        newItem.title = textField.text!
+                        newItem.dateCreated = Date()
+                        currentCategory.items.append(newItem)
+                    }
+                }
+                catch{
+                    print("Error writing items \(error)")
+                }
+            }
             
-            let newItem = Item()
-            newItem.title = textField.text!
-            self.itemArray.append(newItem)
-            
-            self.saveItems()
+            self.tableView.reloadData()
+
+
         }
         
         
@@ -75,34 +102,36 @@ class ToDoListViewController: UITableViewController {
         
     }
     
-    func saveItems(){
-        let encoder = PropertyListEncoder()
-        
-        do{
-            let data = try encoder.encode(itemArray)
-            try data.write(to: dataFilePath!)
-        }
-        catch{
-            print("Error encoding item array: \(error)")
-        }
-        
-        //self.defaults.set(self.itemArray, forKey: "ToDoListArray")
-        
-        self.tableView.reloadData()
 
-    }
     
     func loadItems(){
-        if let data = try? Data(contentsOf: dataFilePath!){
-            let decoder = PropertyListDecoder()
-            do{
-                itemArray = try decoder.decode([Item].self, from: data)
-            }
-            catch{
-                print("Error decoding array: \(error)")
-            }
-        }
+
+        toDoItems = selectedCategory?.items.sorted(byKeyPath: "title", ascending: true)
+        
+        tableView.reloadData()
     }
     
 }
+
+//MARK: - Search bar methods
+extension ToDoListViewController: UISearchBarDelegate{
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        toDoItems = toDoItems?.filter("title CONTAINS[cd] %@", searchBar.text!).sorted(byKeyPath: "dateCreated", ascending: true)
+        
+        tableView.reloadData()
+
+    }
+
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        if searchBar.text?.count == 0{
+            loadItems()
+
+            DispatchQueue.main.async {
+                searchBar.resignFirstResponder()
+            }
+
+        }
+    }
+}
+
 
